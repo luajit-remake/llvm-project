@@ -125,6 +125,12 @@
 
 using namespace llvm;
 
+
+static cl::opt<bool>
+    AddIndirectBranchDestAnnotationForDeegen("add-indirect-branch-dest-annotation-for-deegen", cl::init(false), cl::Hidden,
+                                            cl::desc("Add destination annotations to indirect branches for Deegen"));
+
+
 #define DEBUG_TYPE "asm-printer"
 
 const char DWARFGroupName[] = "dwarf";
@@ -1489,6 +1495,35 @@ void AsmPrinter::emitFunctionBody() {
 
       if (isVerbose())
         emitComments(MI, OutStreamer->getCommentOS());
+
+      if (AddIndirectBranchDestAnnotationForDeegen)
+      {
+          const TargetInstrInfo* TII = MF->getSubtarget().getInstrInfo();
+          if (TII->isTailCall(MI))
+          {
+              OutStreamer->AddComment("__deegen_asm_annotation_tailcall");
+          }
+          else
+          {
+              int jumpTableIndex = TII->getJumpTableIndex(MI);
+              if (jumpTableIndex != -1)
+              {
+                  const std::vector<MachineJumpTableEntry>& jumpTables = MF->getJumpTableInfo()->getJumpTables();
+                  if (jumpTableIndex < 0 || static_cast<size_t>(jumpTableIndex) >= jumpTables.size())
+                  {
+                      fprintf(stderr, "Deegen AsmPrinter hack: Bad jump table index!\n");
+                      abort();
+                  }
+                  std::string annotationText = "__deegen_asm_annotation_indirectbr{";
+                  for (MachineBasicBlock* possibleDestMBB : jumpTables[jumpTableIndex].MBBs)
+                  {
+                      annotationText += possibleDestMBB->getSymbol()->getName().str() + ",";
+                  }
+                  annotationText += "}";
+                  OutStreamer->AddComment(annotationText);
+              }
+          }
+      }
 
       switch (MI.getOpcode()) {
       case TargetOpcode::CFI_INSTRUCTION:
